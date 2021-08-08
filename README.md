@@ -104,7 +104,7 @@ tokio::task::spawn_blocking(move || {
 // wait runtime to be started
 pime::wait_online();
 
-// spawn example tasks from any coroutine
+// Done! Now tasks can be called from any coroutine
 // ...............................................
 // ...............................................
 
