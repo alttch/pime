@@ -218,7 +218,7 @@ impl Error {
             traceback: None,
         })
     }
-    pub fn new_py(error: (String, String, String)) -> Box<Self> {
+    fn new_py(error: (String, String, String)) -> Box<Self> {
         Box::new(Self {
             kind: ErrorKind::PythonError,
             exception: Some(error.0),
@@ -227,7 +227,7 @@ impl Error {
         })
     }
 
-    pub fn new_internal(message: String) -> Box<Self> {
+    fn new_internal(message: String) -> Box<Self> {
         Box::new(Self {
             kind: ErrorKind::PySyncEngineStateError,
             message: format!("CRITICAL: PySyncEngine internal error: {}", message),
@@ -236,7 +236,7 @@ impl Error {
         })
     }
 
-    pub fn new_offline() -> Self {
+    fn new_offline() -> Self {
         Self {
             kind: ErrorKind::PySyncEngineStateError,
             message: "PySyncEngine is offline".to_owned(),
@@ -245,18 +245,10 @@ impl Error {
         }
     }
 
-    pub fn new_online() -> Self {
+    fn new_online() -> Self {
         Self {
             kind: ErrorKind::PySyncEngineStateError,
             message: "PySyncEngine is online".to_owned(),
-            exception: None,
-            traceback: None,
-        }
-    }
-    pub fn new_not_ready() -> Self {
-        Self {
-            kind: ErrorKind::PySyncEngineStateError,
-            message: "PySyncEngine is not initialized".to_owned(),
             exception: None,
             traceback: None,
         }
