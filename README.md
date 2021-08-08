@@ -61,7 +61,7 @@ pip3 install neotasker
 tokio = { version = "1.4", features = ["full"] }
 pyo3 = { version = "0.14.1", features = [] }
 serde-value = "0.7.0"
-pime = { path = "/opt/pime" }
+pime = "*"
 ```
 
 ### Rust code
