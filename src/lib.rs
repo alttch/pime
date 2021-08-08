@@ -1,6 +1,6 @@
 //! # Rust Python Integration Made Easy
 //! 
-//! ## What is this for?
+//! ## What is this for
 //! 
 //! PIME is a Rust crate, which allows [tokio](https://tokio.rs)-based Rust
 //! programs to easily execute Python code snippets.
@@ -482,7 +482,7 @@ impl<'p> PySyncEngine<'p> {
         Ok(())
     }
 
-    pub fn launch(&self, py: &'p pyo3::Python, exec_func: &pyo3::PyAny) -> Result<(), Box<Error>> {
+    pub fn launch(&self, py: &'p pyo3::Python, broker: &pyo3::PyAny) -> Result<(), Box<Error>> {
         need_offline!();
 
         let mut rx = DC.rx.try_lock()?;
@@ -527,14 +527,14 @@ impl<'p> PySyncEngine<'p> {
                         continue;
                     }
                     if task.need_result {
-                        match call.call1((task_id, exec_func, command.unwrap(), params.unwrap())) {
+                        match call.call1((task_id, broker, command.unwrap(), params.unwrap())) {
                             Ok(_) => {}
                             Err(e) => {
                                 report_error(task_id, Error::new(ErrorKind::ExecError, tostr!(e)));
                             }
                         }
                     } else {
-                        let _ = spawn.call1((exec_func, command.unwrap(), params.unwrap()));
+                        let _ = spawn.call1((broker, command.unwrap(), params.unwrap()));
                     }
                 }
             }
