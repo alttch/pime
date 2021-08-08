@@ -42,6 +42,8 @@
 //! When the broker returns a result or raises an exception, this is reported back
 //! to the Rust code.
 //! 
+//! Communication is performed via thread-safe mpsc channels.
+//! 
 //! ## Usage example
 //! 
 //! ### Preparing
