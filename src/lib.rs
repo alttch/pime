@@ -188,52 +188,52 @@ pub struct Error {
     pub traceback: Option<String>,
 }
 
-impl From<PyErr> for Box<Error> {
-    fn from(e: PyErr) -> Box<Error> {
+impl From<PyErr> for Error {
+    fn from(e: PyErr) -> Error {
         Error::new(ErrorKind::InternalError, tostr!(e))
     }
 }
 
-impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Box<Error>
+impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error
 where
     T: std::fmt::Debug,
 {
-    fn from(e: tokio::sync::mpsc::error::SendError<T>) -> Box<Error> {
+    fn from(e: tokio::sync::mpsc::error::SendError<T>) -> Error {
         Error::new_internal(tostr!(e))
     }
 }
 
-impl From<tokio::sync::TryLockError> for Box<Error> {
-    fn from(e: tokio::sync::TryLockError) -> Box<Error> {
+impl From<tokio::sync::TryLockError> for Error {
+    fn from(e: tokio::sync::TryLockError) -> Error {
         Error::new_internal(tostr!(e))
     }
 }
 
 impl Error {
-    pub fn new(kind: ErrorKind, message: String) -> Box<Self> {
-        Box::new(Self {
+    pub fn new(kind: ErrorKind, message: String) -> Self {
+        Self {
             kind,
             message: message.to_owned(),
             exception: None,
             traceback: None,
-        })
+        }
     }
-    fn new_py(error: (String, String, String)) -> Box<Self> {
-        Box::new(Self {
+    fn new_py(error: (String, String, String)) -> Self {
+        Self {
             kind: ErrorKind::PythonError,
             exception: Some(error.0),
             message: error.1,
             traceback: Some(error.2),
-        })
+        }
     }
 
-    fn new_internal(message: String) -> Box<Self> {
-        Box::new(Self {
+    fn new_internal(message: String) -> Self {
+        Self {
             kind: ErrorKind::PySyncEngineStateError,
             message: format!("CRITICAL: PySyncEngine internal error: {}", message),
             exception: None,
             traceback: None,
-        })
+        }
     }
 
     fn new_offline() -> Self {
@@ -304,7 +304,7 @@ struct PyTaskResult {
     task_id: u64,
     ready: Arc<Notify>,
     result: Option<Box<Value>>,
-    error: Option<Box<Error>>,
+    error: Option<Error>,
 }
 
 impl PyTaskResult {
@@ -314,7 +314,7 @@ impl PyTaskResult {
             None => self.result = None,
         }
     }
-    fn set_error(&mut self, error: Box<Error>) {
+    fn set_error(&mut self, error: Error) {
         self.error = Some(error);
     }
 }
@@ -351,7 +351,7 @@ pub struct PySyncEngine<'p> {
 macro_rules! need_online {
     () => {
         if ENGINE_STATE.load(Ordering::SeqCst) != STATE_STARTED {
-            return Err(Box::new(Error::new_offline()));
+            return Err(Error::new_offline());
         }
     };
 }
@@ -359,7 +359,7 @@ macro_rules! need_online {
 macro_rules! need_offline {
     () => {
         if ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
-            return Err(Box::new(Error::new_online()));
+            return Err(Error::new_online());
         }
     };
 }
@@ -376,7 +376,7 @@ macro_rules! log_lost_task {
     };
 }
 
-fn report_error(task_id: u64, error: Box<Error>) {
+fn report_error(task_id: u64, error: Error) {
     loop {
         match PY_RESULTS.try_write() {
             Ok(mut v) => {
@@ -400,9 +400,9 @@ fn report_error(task_id: u64, error: Box<Error>) {
 }
 
 impl<'p> PySyncEngine<'p> {
-    pub fn new(py: &'p pyo3::Python) -> Result<Self, Box<Error>> {
+    pub fn new(py: &'p pyo3::Python) -> Result<Self, Error> {
         if ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
-            return Err(Box::new(Error::new_online()));
+            return Err(Error::new_online());
         }
         #[pyfunction]
         fn report_result(
@@ -451,30 +451,30 @@ impl<'p> PySyncEngine<'p> {
         Ok(Self { neo })
     }
 
-    pub fn add_import_path(&self, path: &str) -> Result<(), Box<Error>> {
+    pub fn add_import_path(&self, path: &str) -> Result<(), Error> {
         match self.neo.call_method1("add_import_path", (path,)) {
             Ok(_) => Ok(()),
             Err(e) => Err(Error::new(ErrorKind::PythonError, tostr!(e))),
         }
     }
 
-    pub fn enable_debug(&self) -> Result<(), Box<Error>> {
+    pub fn enable_debug(&self) -> Result<(), Error> {
         self.neo.call_method0("set_debug")?;
         Ok(())
     }
 
-    pub fn set_poll_delay(&self, delay: f32) -> Result<(), Box<Error>> {
+    pub fn set_poll_delay(&self, delay: f32) -> Result<(), Error> {
         self.neo.call_method1("set_poll_delay", (delay,))?;
         Ok(())
     }
 
-    pub fn set_thread_pool_size(&self, min: u32, max: u32) -> Result<(), Box<Error>> {
+    pub fn set_thread_pool_size(&self, min: u32, max: u32) -> Result<(), Error> {
         self.neo
             .call_method1("set_thread_pool_size", ((min, max),))?;
         Ok(())
     }
 
-    pub fn launch(&self, py: &'p pyo3::Python, broker: &pyo3::PyAny) -> Result<(), Box<Error>> {
+    pub fn launch(&self, py: &'p pyo3::Python, broker: &pyo3::PyAny) -> Result<(), Error> {
         need_offline!();
 
         let mut rx = DC.rx.try_lock()?;
@@ -539,7 +539,7 @@ impl<'p> PySyncEngine<'p> {
     }
 }
 
-pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Box<Error>> {
+pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
     need_online!();
     if !task.need_result {
         DC.tx.lock().await.send((0, Some(task))).await?;
@@ -583,7 +583,7 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Box<Error>> {
     }
 }
 
-pub async fn stop() -> Result<(), Box<Error>> {
+pub async fn stop() -> Result<(), Error> {
     need_online!();
     DC.tx.lock().await.send((0, None)).await?;
     wait_offline();
