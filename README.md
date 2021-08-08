@@ -86,8 +86,8 @@ tokio::task::spawn_blocking(move || {
         // all work with the Python object MUST be performed in this thread
         // after there is no way to reconfigure it
         let engine = pime::PySyncEngine::new(&py).unwrap();
-        let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
         // inserts directories into Python's sys.path
+        let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
         engine.add_import_path(&cwd).unwrap();
         // enables debug mode
         engine.enable_debug().unwrap();
