@@ -101,7 +101,7 @@ tokio::task::spawn_blocking(move || {
         engine.launch(&py, broker).unwrap();
     });
 });
-// wait runtime to be started
+// wait engine to be started
 pime::wait_online();
 
 // Done! Now tasks can be called from any coroutine
