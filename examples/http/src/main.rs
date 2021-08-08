@@ -31,7 +31,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                     http_error!(StatusCode::INTERNAL_SERVER_ERROR)
                 }
             },
-            Err(e) if e.kind == pime::ErrorKind::PythonError => {
+            Err(e) if e.kind == pime::ErrorKind::PyException => {
                 match e.exception.unwrap().as_str() {
                     "KeyError" => http_error!(StatusCode::NOT_FOUND),
                     _ => http_error!(StatusCode::INTERNAL_SERVER_ERROR)

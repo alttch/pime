@@ -59,7 +59,7 @@
 //! ```toml
 //! [dependencies]
 //! tokio = { version = "1.4", features = ["full"] }
-//! pyo3 = { version = "0.14.1", features = [] }
+//! pyo3 = { version = "0.14.1" }
 //! serde-value = "0.7.0"
 //! pime = "*"
 //! ```
@@ -101,7 +101,7 @@
 //!         engine.launch(&py, broker).unwrap();
 //!     });
 //! });
-//! // wait runtime to be started
+//! // wait engine to be started
 //! pime::wait_online();
 //! 
 //! // Done! Now tasks can be called from any coroutine
@@ -120,7 +120,7 @@
 //!         // The result is returned as Option<Value>
 //!         println!("{:?}", result);
 //!     },
-//!     Err(e) if e.kind == pime::ErrorKind::PythonError => {
+//!     Err(e) if e.kind == pime::ErrorKind::PyException => {
 //!         println!("Exception raised {}: {}", e.exception.unwrap(), e.message);
 //!         println!("{}", e.traceback.unwrap());
 //!     }
@@ -143,6 +143,11 @@
 //!     else:
 //!         raise RuntimeError('command unsupported')
 //! ```
+//! 
+//! ## More examples
+//! 
+//! https://github.com/alttch/pime/tree/main/examples/
+//! 
 use log::{debug, error};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
@@ -172,7 +177,7 @@ static ENGINE_STATE: AtomicU8 = AtomicU8::new(STATE_STOPPED);
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ErrorKind {
-    PythonError,
+    PyException,
     PackError,
     UnpackError,
     ExecError,
@@ -220,7 +225,7 @@ impl Error {
     }
     fn new_py(error: (String, String, String)) -> Self {
         Self {
-            kind: ErrorKind::PythonError,
+            kind: ErrorKind::PyException,
             exception: Some(error.0),
             message: error.1,
             traceback: Some(error.2),
@@ -454,7 +459,7 @@ impl<'p> PySyncEngine<'p> {
     pub fn add_import_path(&self, path: &str) -> Result<(), Error> {
         match self.neo.call_method1("add_import_path", (path,)) {
             Ok(_) => Ok(()),
-            Err(e) => Err(Error::new(ErrorKind::PythonError, tostr!(e))),
+            Err(e) => Err(Error::new(ErrorKind::PyException, tostr!(e))),
         }
     }
 

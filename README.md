@@ -120,7 +120,7 @@ match pime::call(task).await {
         // The result is returned as Option<Value>
         println!("{:?}", result);
     },
-    Err(e) if e.kind == pime::ErrorKind::PythonError => {
+    Err(e) if e.kind == pime::ErrorKind::PyException => {
         println!("Exception raised {}: {}", e.exception.unwrap(), e.message);
         println!("{}", e.traceback.unwrap());
     }
@@ -143,3 +143,8 @@ def broker(command, params):
     else:
         raise RuntimeError('command unsupported')
 ```
+
+## More examples
+
+https://github.com/alttch/pime/tree/main/examples/
+
