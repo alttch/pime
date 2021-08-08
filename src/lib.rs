@@ -122,23 +122,23 @@ impl Error {
 
 #[derive(Debug)]
 pub struct PyTask {
-    func: String,
+    command: Value,
     params: BTreeMap<String, Value>,
     need_result: bool,
 }
 
 impl PyTask {
-    pub fn new(func: String, params: BTreeMap<String, Value>) -> Box<Self> {
+    pub fn new(command: Value, params: BTreeMap<String, Value>) -> Box<Self> {
         Box::new(Self {
-            func,
+            command,
             params,
             need_result: true,
         })
     }
 
-    pub fn new0(func: String) -> Box<Self> {
+    pub fn new0(command: Value) -> Box<Self> {
         Box::new(Self {
-            func,
+            command,
             params: BTreeMap::new(),
             need_result: true,
         })
@@ -363,7 +363,17 @@ impl<'p> PySyncEngine<'p> {
                     break;
                 }
                 Some(task) => {
+                    let command = pythonize(*py, &task.command);
                     let params = pythonize(*py, &task.params);
+                    if command.is_err() {
+                        if task_id != 0 {
+                            report_error(
+                                task_id,
+                                Error::new(ErrorKind::PackError, tostr!(params.err().unwrap())),
+                            );
+                        }
+                        continue;
+                    }
                     if params.is_err() {
                         if task_id != 0 {
                             report_error(
@@ -374,14 +384,14 @@ impl<'p> PySyncEngine<'p> {
                         continue;
                     }
                     if task.need_result {
-                        match call.call1((task_id, exec_func, &task.func, params.unwrap())) {
+                        match call.call1((task_id, exec_func, command.unwrap(), params.unwrap())) {
                             Ok(_) => {}
                             Err(e) => {
                                 report_error(task_id, Error::new(ErrorKind::ExecError, tostr!(e)));
                             }
                         }
                     } else {
-                        let _ = spawn.call1((exec_func, &task.func, params.unwrap()));
+                        let _ = spawn.call1((exec_func, command.unwrap(), params.unwrap()));
                     }
                 }
             }
