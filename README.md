@@ -110,8 +110,9 @@ let mut params = BTreeMap::new();
 params.insert("param1".to_owned(), Value::U32(123));
 params.insert("param2".to_owned(), Value::String("hello"));
 let task = pime::PyTask::new(Value::String("hello".to_owned(), params));
-// if task result is not required, it can be marked to be executed forever in
-// ThreadPoolExecutor, until finished. In this case, await always returns None
+// if the task result is not required, the task can be marked to be executed
+// forever in ThreadPoolExecutor, until finished. In this case, await always
+// returns None
 //task.no_wait();
 let result = match pime::call.await {
     Ok(v) => v,
