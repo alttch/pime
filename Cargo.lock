@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "pime"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "lazy_static",
  "log",
