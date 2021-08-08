@@ -1,3 +1,5 @@
+//! # pime
+//! Rust Python Integration Made Easy
 use log::{debug, error};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
