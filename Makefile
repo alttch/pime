@@ -17,7 +17,7 @@ doc:
 	rm -f src/lib.rs.tmp
 	cargo doc
 
-pub: doc test publish-cargo-crate
+pub: doc publish-cargo-crate tag
 
 publish-cargo-crate:
 	cargo publish
