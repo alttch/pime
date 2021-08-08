@@ -107,16 +107,18 @@ pime::wait_online();
 // ...............................................
 
 let mut params = BTreeMap::new();
-params.insert("param1".to_owned(), Value::U32(123));
-params.insert("param2".to_owned(), Value::String("hello"));
-let task = pime::PyTask::new(Value::String("hello".to_owned(), params));
+params.insert("name".to_owned(), Value::String("Rust".to_owned()));
+let mut task = pime::PyTask::new(Value::String("hello".to_owned()), params);
 // if the task result is not required, the task can be marked to be executed
 // forever in ThreadPoolExecutor, until finished. In this case, await always
 // returns None
 //task.no_wait();
-let result = match pime::call.await {
-    Ok(v) => v,
-    Err(e) if e.kind == pime::ErrorKind::PythonError {
+match pime::call(task).await {
+    Ok(result) => {
+        // The result is returned as Option<Value>
+        println!("{:?}", result);
+    },
+    Err(e) if e.kind == pime::ErrorKind::PythonError => {
         println!("Exception raised {}: {}", e.exception.unwrap(), e.message);
         println!("{}", e.traceback.unwrap());
     }
@@ -124,6 +126,8 @@ let result = match pime::call.await {
         println!("An error is occurred: {}", e.message);
     }
 };
+// stop the engine gracefully
+pime::stop().await;
 ```
 
 ### Python code (mymod/\_\_init\_\_.py)
@@ -131,7 +135,7 @@ let result = match pime::call.await {
 ```python
 def broker(command, params):
     if command == 'hello':
-        return 'Hi from Python!'
+        return f'Hi from Python, {params["name"]}!'
     elif command == 'bye':
         return 'Bye bye'
     else:
