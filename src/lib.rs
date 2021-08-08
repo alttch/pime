@@ -27,10 +27,10 @@
 //! |rust code   | await task1 | rust code   | task1              |
 //! |await task2 | await task3 | rust code   | task2 task3        |
 //! 
-//! When a Rust coroutine want to execute a Python task, it creates
+//! When a Rust coroutine wants to execute a Python task, it creates
 //! **pime::PyTask** object and executes **pime::call** method. If the execution is
 //! successful, the result is returned as
-//! (serde-value::Value)[https://crates.io/crates/serde-value] object, otherwise as
+//! [serde-value::Value](https://crates.io/crates/serde-value) object, otherwise as
 //! **pime::Error**, which contains either Python exception information or an
 //! engine error.
 //! 
@@ -86,8 +86,8 @@
 //!         // all work with the Python object MUST be performed in this thread
 //!         // after there is no way to reconfigure it
 //!         let engine = pime::PySyncEngine::new(&py).unwrap();
-//!         let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
 //!         // inserts directories into Python's sys.path
+//!         let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
 //!         engine.add_import_path(&cwd).unwrap();
 //!         // enables debug mode
 //!         engine.enable_debug().unwrap();
@@ -104,7 +104,7 @@
 //! // wait runtime to be started
 //! pime::wait_online();
 //! 
-//! // spawn example tasks from any coroutine
+//! // Done! Now tasks can be called from any coroutine
 //! // ...............................................
 //! // ...............................................
 //! 
