@@ -1,6 +1,6 @@
 # Rust Python Integration Made Easy
 
-## What is this for?
+## What is this for
 
 PIME is a Rust crate, which allows [tokio](https://tokio.rs)-based Rust
 programs to easily execute Python code snippets.
