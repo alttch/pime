@@ -18,9 +18,8 @@ into Rust as simple as possible.
 
 Let us look inside PIME-integrated Rust program:
 
------------   -----------   -----------  ------------------
-Rust thread   Rust thread   Rust thread  Python GIL thread
-...........   ...........   ...........  ~~~~~~~~~~~~~~~~~~
-rust code     rust code     rust code    ThreadPoolExecutor
-rust code     await task1   rust code    task1
-await task2   await task3   rust code    task2 task3
+|Rust thread | Rust thread | Rust thread | Python GIL thread  |
+|------------|-------------|-------------|--------------------|
+|rust code   | rust code   | rust code   | ThreadPoolExecutor |
+|rust code   | await task1 | rust code   | task1              |
+|await task2 | await task3 | rust code   | task2 task3        |
