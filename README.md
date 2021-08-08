@@ -59,7 +59,7 @@ pip3 install neotasker
 ```toml
 [dependencies]
 tokio = { version = "1.4", features = ["full"] }
-pyo3 = { version = "0.14.1", features = [] }
+pyo3 = { version = "0.14.1" }
 serde-value = "0.7.0"
 pime = "*"
 ```
