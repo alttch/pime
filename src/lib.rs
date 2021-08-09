@@ -153,7 +153,6 @@ use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use serde_value::Value;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
