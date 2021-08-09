@@ -112,8 +112,8 @@ let mut params = BTreeMap::new();
 params.insert("name".to_owned(), Value::String("Rust".to_owned()));
 let mut task = pime::PyTask::new(Value::String("hello".to_owned()), params);
 // If the task result is not required, the task can be marked to be executed
-// forever in ThreadPoolExecutor, until finished. In this case, await always
-// returns None
+// forever in ThreadPoolExecutor, until finished. In this case, "call" always
+// returns result None
 //task.no_wait();
 // If a task performs calculations only, it can be marked as exclusive.
 // This type of tasks lock Python thread until completed. Use with care!
