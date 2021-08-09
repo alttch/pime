@@ -155,7 +155,7 @@ use serde_value::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex, Notify, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 pub const STATE_STOPPED: u8 = 0;
 pub const STATE_STARTING: u8 = 1;
@@ -323,7 +323,7 @@ impl DataChannel {
 #[derive(Debug)]
 struct PyTaskResult {
     task_id: u64,
-    ready: Arc<Notify>,
+    ready: triggered::Trigger,
     result: Option<Box<Value>>,
     error: Option<Error>,
 }
@@ -409,7 +409,7 @@ fn report_error(task_id: u64, error: Error) {
                     }
                 };
                 o.set_error(error);
-                o.ready.notify_waiters();
+                o.ready.trigger();
                 break;
             }
             Err(_) => {
@@ -457,7 +457,7 @@ impl<'p> PySyncEngine<'p> {
                             Some(e) => o.set_error(Error::new_py(e)),
                             None => {}
                         }
-                        o.ready.notify_waiters();
+                        o.ready.trigger();
                         break;
                     }
                     Err(_) => {
@@ -597,14 +597,14 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
             }
         };
     }
-    let beacon = Arc::new(Notify::new());
+    let (trigger, listener) = triggered::trigger();
     PY_RESULTS.write().await.insert(
         task_id,
         PyTaskResult {
             task_id,
             result: None,
             error: None,
-            ready: beacon.clone(),
+            ready: trigger,
         },
     );
     DC.read()
@@ -614,7 +614,7 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
         .await
         .send((task_id, Some(task)))
         .await?;
-    beacon.notified().await;
+    listener.await;
     let res = match PY_RESULTS.write().await.remove(&task_id) {
         Some(v) => v,
         None => {
