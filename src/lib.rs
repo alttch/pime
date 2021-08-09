@@ -111,10 +111,13 @@
 //! let mut params = BTreeMap::new();
 //! params.insert("name".to_owned(), Value::String("Rust".to_owned()));
 //! let mut task = pime::PyTask::new(Value::String("hello".to_owned()), params);
-//! // if the task result is not required, the task can be marked to be executed
-//! // forever in ThreadPoolExecutor, until finished. In this case, await always
-//! // returns None
+//! // If the task result is not required, the task can be marked to be executed
+//! // forever in ThreadPoolExecutor, until finished. In this case, "call" always
+//! // returns result None
 //! //task.no_wait();
+//! // If a task performs calculations only, it can be marked as exclusive.
+//! // Tasks of this type lock Python thread until completed. Use with care!
+//! //task.mark_exclusive();
 //! match pime::call(task).await {
 //!     Ok(result) => {
 //!         // The result is returned as Option<Value>
@@ -153,6 +156,8 @@ use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use serde_value::Value;
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
@@ -162,8 +167,6 @@ pub const STATE_STOPPING: u8 = 2;
 pub const STATE_STARTED: u8 = 0xff;
 
 const DATACHANNEL_DEFAULT_BUFFER: usize = 1024;
-
-use std::sync::atomic::{AtomicU8, Ordering};
 
 #[macro_use]
 extern crate lazy_static;
@@ -186,12 +189,45 @@ pub enum ErrorKind {
     PySyncEngineStateError,
 }
 
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ErrorKind::*;
+        write!(
+            f,
+            "{}",
+            match self {
+                PyException => "Python exception",
+                PackError => "Data pack error",
+                UnpackError => "Data unpack error",
+                ExecError => "Task execution error",
+                InternalError => "Internal error",
+                PySyncEngineStateError => "Engine state error",
+            }
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct Error {
     pub kind: ErrorKind,
     pub message: String,
     pub exception: Option<String>,
     pub traceback: Option<String>,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.kind == ErrorKind::PyException {
+            write!(
+                f,
+                "Python exception {}: {}",
+                self.exception.as_ref().unwrap(),
+                self.message
+            )
+        } else {
+            write!(f, "{}: {}", self.kind, self.message)
+        }
+    }
 }
 
 impl From<PyErr> for Error {
