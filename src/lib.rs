@@ -162,6 +162,8 @@ pub const STATE_STARTING: u8 = 1;
 pub const STATE_STOPPING: u8 = 2;
 pub const STATE_STARTED: u8 = 0xff;
 
+const DATACHANNEL_DEFAULT_BUFFER: usize = 1024;
+
 use std::sync::atomic::{AtomicU8, Ordering};
 
 #[macro_use]
@@ -265,6 +267,7 @@ pub struct PyTask {
     command: Value,
     params: BTreeMap<String, Value>,
     need_result: bool,
+    exclusive: bool,
 }
 
 impl PyTask {
@@ -273,6 +276,7 @@ impl PyTask {
             command,
             params,
             need_result: true,
+            exclusive: false,
         })
     }
 
@@ -281,11 +285,17 @@ impl PyTask {
             command,
             params: BTreeMap::new(),
             need_result: true,
+            exclusive: false,
         })
     }
 
     pub fn no_wait(&mut self) {
         self.need_result = false;
+    }
+
+    pub fn mark_exclusive(&mut self) {
+        self.exclusive = true;
+        self.need_result = true;
     }
 }
 
@@ -296,11 +306,17 @@ struct DataChannel {
 
 impl DataChannel {
     fn new() -> Self {
-        let (tx, rx) = mpsc::channel::<(u64, Option<Box<PyTask>>)>(1024);
+        let (tx, rx) = mpsc::channel::<(u64, Option<Box<PyTask>>)>(DATACHANNEL_DEFAULT_BUFFER);
         Self {
             tx: Mutex::new(tx),
             rx: Mutex::new(rx),
         }
+    }
+
+    fn set_buffer(&mut self, buffer: usize) {
+        let (tx, rx) = mpsc::channel::<(u64, Option<Box<PyTask>>)>(buffer);
+        self.tx = Mutex::new(tx);
+        self.rx = Mutex::new(rx);
     }
 }
 
@@ -346,7 +362,7 @@ lazy_static! {
     static ref PY_RESULTS: RwLock<Box<BTreeMap<u64, PyTaskResult>>> =
         RwLock::new(Box::new(BTreeMap::new()));
     static ref TASK_COUNTER: Mutex<PyTaskCounter> = Mutex::new(PyTaskCounter::new());
-    static ref DC: DataChannel = DataChannel::new();
+    static ref DC: RwLock<DataChannel> = RwLock::new(DataChannel::new());
 }
 
 pub struct PySyncEngine<'p> {
@@ -482,10 +498,12 @@ impl<'p> PySyncEngine<'p> {
     pub fn launch(&self, py: &'p pyo3::Python, broker: &pyo3::PyAny) -> Result<(), Error> {
         need_offline!();
 
-        let mut rx = DC.rx.try_lock()?;
+        let dc = DC.try_read()?;
+        let mut rx = dc.rx.try_lock()?;
 
         self.neo.call_method0("start")?;
         let call = self.neo.getattr("call")?;
+        let call_direct = self.neo.getattr("call_direct")?;
         let spawn = self.neo.getattr("spawn")?;
 
         ENGINE_STATE.store(STATE_STARTED, Ordering::SeqCst);
@@ -523,7 +541,19 @@ impl<'p> PySyncEngine<'p> {
                         }
                         continue;
                     }
-                    if task.need_result {
+                    if task.exclusive {
+                        match call_direct.call1((
+                            task_id,
+                            broker,
+                            command.unwrap(),
+                            params.unwrap(),
+                        )) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                report_error(task_id, Error::new(ErrorKind::ExecError, tostr!(e)));
+                            }
+                        }
+                    } else if task.need_result {
                         match call.call1((task_id, broker, command.unwrap(), params.unwrap())) {
                             Ok(_) => {}
                             Err(e) => {
@@ -547,7 +577,13 @@ impl<'p> PySyncEngine<'p> {
 pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
     need_online!();
     if !task.need_result {
-        DC.tx.lock().await.send((0, Some(task))).await?;
+        DC.read()
+            .await
+            .tx
+            .lock()
+            .await
+            .send((0, Some(task)))
+            .await?;
         return Ok(None);
     }
     let task_id;
@@ -571,7 +607,13 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
             ready: beacon.clone(),
         },
     );
-    DC.tx.lock().await.send((task_id, Some(task))).await?;
+    DC.read()
+        .await
+        .tx
+        .lock()
+        .await
+        .send((task_id, Some(task)))
+        .await?;
     beacon.notified().await;
     let res = match PY_RESULTS.write().await.remove(&task_id) {
         Some(v) => v,
@@ -590,7 +632,7 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
 
 pub async fn stop() -> Result<(), Error> {
     need_online!();
-    DC.tx.lock().await.send((0, None)).await?;
+    DC.read().await.tx.lock().await.send((0, None)).await?;
     wait_offline();
     Ok(())
 }
@@ -613,4 +655,8 @@ pub fn wait_offline() {
     while ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+pub fn set_mpsc_buffer(buffer: usize) {
+    DC.try_write().unwrap().set_buffer(buffer);
 }
