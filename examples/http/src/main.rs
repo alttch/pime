@@ -20,7 +20,10 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let (parts, _body) = req.into_parts();
     let path = parts.uri.path();
     if parts.method == Method::GET {
-        let task = pime::PyTask::new0(Value::String(path.to_owned()));
+        let mut task = pime::PyTask::new0(Value::String(path.to_owned()));
+        // exclusive tasks lock Python thread until finished
+        // use with care!
+        task.mark_exclusive();
         match pime::call(task).await {
             Ok(v) => match *v.unwrap() {
                 Value::String(s) => Ok(Response::builder()
@@ -54,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let engine = pime::PySyncEngine::new(&py).unwrap();
             let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
             engine.add_import_path(&cwd).unwrap();
-            engine.enable_debug().unwrap();
+            //engine.enable_debug().unwrap();
             engine.set_thread_pool_size(10, 10).unwrap();
             let module = py.import("myweb").unwrap();
             let broker = module.getattr("dispatcher").unwrap();
