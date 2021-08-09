@@ -116,7 +116,7 @@ let mut task = pime::PyTask::new(Value::String("hello".to_owned()), params);
 // returns result None
 //task.no_wait();
 // If a task performs calculations only, it can be marked as exclusive.
-// This type of tasks lock Python thread until completed. Use with care!
+// Tasks of this type lock Python thread until completed. Use with care!
 //task.mark_exclusive();
 match pime::call(task).await {
     Ok(result) => {
