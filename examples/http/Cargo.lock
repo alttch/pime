@@ -368,9 +368,9 @@ dependencies = [
 
 [[package]]
 name = "pime"
-version = "0.0.7"
+version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48ffa52948381517f8442eeba7589d35fefb874921a2d4ed79e47a878a4862bd"
+checksum = "c92c03a23ed67344940d60b37b72963d84a753fae0908d6807758e67087597f9"
 dependencies = [
  "lazy_static",
  "log",
