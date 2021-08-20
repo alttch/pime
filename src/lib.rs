@@ -102,7 +102,7 @@
 //!     });
 //! });
 //! // wait engine to be started
-//! pime::wait_online();
+//! pime::wait_online().await;
 //! 
 //! // Done! Now tasks can be called from any coroutine
 //! // ...............................................
@@ -160,6 +160,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::time::sleep;
 
 pub const STATE_STOPPED: u8 = 0;
 pub const STATE_STARTING: u8 = 1;
@@ -668,7 +669,7 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
 pub async fn stop() -> Result<(), Error> {
     need_online!();
     DC.read().await.tx.lock().await.send((0, None)).await?;
-    wait_offline();
+    wait_offline().await;
     Ok(())
 }
 
@@ -680,15 +681,15 @@ pub fn is_engine_started() -> bool {
     ENGINE_STATE.load(Ordering::SeqCst) == STATE_STARTED
 }
 
-pub fn wait_online() {
+pub async fn wait_online() {
     while ENGINE_STATE.load(Ordering::SeqCst) != STATE_STARTED {
-        std::thread::sleep(Duration::from_millis(10));
+        sleep(Duration::from_millis(10)).await;
     }
 }
 
-pub fn wait_offline() {
+pub async fn wait_offline() {
     while ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
-        std::thread::sleep(Duration::from_millis(10));
+        sleep(Duration::from_millis(10)).await;
     }
 }
 

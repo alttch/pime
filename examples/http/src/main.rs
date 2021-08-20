@@ -64,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             engine.launch(&py, broker).unwrap();
         });
     });
+    pime::wait_online().await;
     let addr = SocketAddr::from(([127, 0, 0, 1], 9922));
     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handler)) });
     tokio::spawn(async move {
@@ -71,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = pime::stop().await;
         std::process::exit(0);
     });
+    println!("started");
     loop {
         let server = Server::bind(&addr).serve(make_svc);
         let _ = server.await;

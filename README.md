@@ -102,7 +102,7 @@ tokio::task::spawn_blocking(move || {
     });
 });
 // wait engine to be started
-pime::wait_online();
+pime::wait_online().await;
 
 // Done! Now tasks can be called from any coroutine
 // ...............................................
