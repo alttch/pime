@@ -529,7 +529,7 @@ impl<'p> PySyncEngine<'p> {
                 match use_ssp {
                     Some(v) if v == "false" => {
                         debug!("Removing system-site packages from Python path");
-                        py.run("import sys;list(map(lambda x:sys.path.remove(x) if '-packages' in x else False, sys.path.copy()))", None, None)?;
+                        py.run("import sys;list(map(lambda x:sys.path.remove(x) if x.endswith('-packages') or '/dist-packages/' in x or '/site-packages/' in x else False, sys.path.copy()))", None, None)?;
                     }
                     _ => {}
                 }
