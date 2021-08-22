@@ -151,12 +151,14 @@
 //! 
 //! https://github.com/alttch/pime/tree/main/examples/
 //! 
+use ini::Ini;
 use log::{debug, error};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use serde_value::Value;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -219,12 +221,15 @@ pub struct Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.kind == ErrorKind::PyException {
-            write!(
-                f,
-                "Python exception {}: {}",
-                self.exception.as_ref().unwrap(),
-                self.message
-            )
+            let mut exc = "Python exception".to_owned();
+            self.exception.as_ref().map(|exception| {
+                exc += " ";
+                exc += exception;
+                if !self.message.is_empty() {
+                    exc += ":"
+                }
+            });
+            write!(f, "{} {}", exc, self.message)
         } else {
             write!(f, "{}: {}", self.kind, self.message)
         }
@@ -458,6 +463,12 @@ fn report_error(task_id: u64, error: Error) {
 
 impl<'p> PySyncEngine<'p> {
     pub fn new(py: &'p pyo3::Python) -> Result<Self, Error> {
+        PySyncEngine::new_engine(py, None)
+    }
+    pub fn new_venv(py: &'p pyo3::Python, venv_path: &str) -> Result<Self, Error> {
+        PySyncEngine::new_engine(py, Some(venv_path))
+    }
+    fn new_engine(py: &'p pyo3::Python, venv_path: Option<&str>) -> Result<Self, Error> {
         if ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
             return Err(Error::new_online());
         }
@@ -503,13 +514,47 @@ impl<'p> PySyncEngine<'p> {
                 }
             }
         }
+        match venv_path {
+            Some(dir) => {
+                let cfg = format!("{}/pyvenv.cfg", dir);
+                let ini = match Ini::load_from_file(&cfg) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Err(Error::new(
+                            ErrorKind::InternalError,
+                            format!("Unable to read venv config file {}: {}", cfg, e),
+                        ));
+                    }
+                };
+                let use_ssp = ini.general_section().get("include-system-site-packages");
+                match use_ssp {
+                    Some(v) if v == "false" => {
+                        debug!("Removing system-site packages from Python path");
+                        py.run("import sys;list(map(lambda x:sys.path.remove(x) if '-packages' in x else False, sys.path.copy()))", None, None)?;
+                    }
+                    _ => {}
+                }
+                let ver_info = py.version_info();
+                let import_path = format!(
+                    "{}/lib/python{}.{}/site-packages",
+                    dir, ver_info.major, ver_info.minor
+                );
+                debug!("Adding Python venv import path: {}", import_path);
+                py.run(
+                    &format!("import sys;sys.path.insert(0,'{}')", import_path),
+                    None,
+                    None,
+                )?;
+            }
+            None => {}
+        }
         let neo = py.import("neotasker.embed")?;
         neo.add_function(wrap_pyfunction!(report_result, neo)?)?;
         Ok(Self { neo })
     }
 
-    pub fn add_import_path(&self, path: &str) -> Result<(), Error> {
-        match self.neo.call_method1("add_import_path", (path,)) {
+    pub fn add_import_path(&self, dir: &str) -> Result<(), Error> {
+        match self.neo.call_method1("add_import_path", (dir,)) {
             Ok(_) => Ok(()),
             Err(e) => Err(Error::new(ErrorKind::PyException, tostr!(e))),
         }
