@@ -525,15 +525,61 @@ impl<'p> PySyncEngine<'p> {
                         ));
                     }
                 };
-                let use_ssp = ini.general_section().get("include-system-site-packages");
-                match use_ssp {
+                let ver_info = py.version_info();
+                macro_rules! unwrap_ver_err {
+                    ($v: expr) => {
+                        match $v {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(Error::new(
+                                    ErrorKind::PyException,
+                                    format!("Unable to parse venv version info: {}", e),
+                                ));
+                            }
+                        }
+                    };
+                }
+                macro_rules! unwrap_ver {
+                    ($v: expr) => {
+                        match $v {
+                            Some(v) => v,
+                            None => {
+                                return Err(Error::new(
+                                    ErrorKind::PyException,
+                                    "Unable to get venv version info".to_owned(),
+                                ));
+                            }
+                        }
+                    };
+                }
+                let venv_ver = unwrap_ver!(ini.general_section().get("version"));
+                let mut s = venv_ver.split(".");
+                let venv_major = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
+                let venv_minor = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
+                if venv_major != ver_info.major || venv_minor != ver_info.minor {
+                    return Err(Error::new(
+                        ErrorKind::PyException,
+                        format!(
+                            "Unable to activate venv, \
+                            Python library version: {}.{}, venv version: {}. \
+                            Please switch the library or rebuild venv",
+                            ver_info.major, ver_info.minor, venv_ver
+                        ),
+                    ));
+                }
+                match ini.general_section().get("include-system-site-packages") {
                     Some(v) if v == "false" => {
                         debug!("Removing system-site packages from Python path");
-                        py.run("import sys;list(map(lambda x:sys.path.remove(x) if x.endswith('-packages') or '/dist-packages/' in x or '/site-packages/' in x else False, sys.path.copy()))", None, None)?;
+                        py.run(
+                            "import sys;list(map(lambda x:sys.path.remove(x) \
+                            if x.endswith('-packages') or '/dist-packages/' in x or \
+                            '/site-packages/' in x else False, sys.path.copy()))",
+                            None,
+                            None,
+                        )?;
                     }
                     _ => {}
                 }
-                let ver_info = py.version_info();
                 let import_path = format!(
                     "{}/lib/python{}.{}/site-packages",
                     dir, ver_info.major, ver_info.minor
@@ -544,6 +590,11 @@ impl<'p> PySyncEngine<'p> {
                     None,
                     None,
                 )?;
+                //py.run(
+                //"import sys;print(sys.path)",
+                //None,
+                //None,
+                //)?;
             }
             None => {}
         }
