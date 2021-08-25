@@ -370,10 +370,7 @@ struct PyTaskResult {
 
 impl PyTaskResult {
     fn set_result(&mut self, result: Option<Value>) {
-        match result {
-            Some(v) => self.result = Some(Box::new(v)),
-            None => self.result = None,
-        }
+        self.result = result.map(|v| Box::new(v));
     }
     fn set_error(&mut self, error: Error) {
         self.error = Some(error);
