@@ -550,7 +550,7 @@ impl<'p> PySyncEngine<'p> {
                     };
                 }
                 let venv_ver = unwrap_ver!(ini.general_section().get("version"));
-                let mut s = venv_ver.split(".");
+                let mut s = venv_ver.split('.');
                 let venv_major = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
                 let venv_minor = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
                 if venv_major != ver_info.major || venv_minor != ver_info.minor {
