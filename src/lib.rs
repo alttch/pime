@@ -221,13 +221,13 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.kind == ErrorKind::PyException {
             let mut exc = "Python exception".to_owned();
-            self.exception.as_ref().map(|exception| {
+            if let Some(exception) = self.exception.as_ref() {
                 exc += " ";
                 exc += exception;
                 if !self.message.is_empty() {
                     exc += ":"
                 }
-            });
+            };
             write!(f, "{} {}", exc, self.message)
         } else {
             write!(f, "{}: {}", self.kind, self.message)
@@ -260,7 +260,7 @@ impl Error {
     pub fn new(kind: ErrorKind, message: String) -> Self {
         Self {
             kind,
-            message: message.to_owned(),
+            message,
             exception: None,
             traceback: None,
         }
@@ -369,6 +369,7 @@ struct PyTaskResult {
 }
 
 impl PyTaskResult {
+    #[allow(clippy::redundant_closure)]
     fn set_result(&mut self, result: Option<Value>) {
         self.result = result.map(|v| Box::new(v));
     }
@@ -496,9 +497,8 @@ impl<'p> PySyncEngine<'p> {
                             }
                         };
                         o.set_result(data);
-                        match error {
-                            Some(e) => o.set_error(Error::new_py(e)),
-                            None => {}
+                        if let Some(e) = error {
+                            o.set_error(Error::new_py(e));
                         }
                         o.ready.trigger();
                         break;
@@ -510,90 +510,87 @@ impl<'p> PySyncEngine<'p> {
                 }
             }
         }
-        match venv_path {
-            Some(dir) => {
-                let cfg = format!("{}/pyvenv.cfg", dir);
-                let ini = match Ini::load_from_file(&cfg) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return Err(Error::new(
-                            ErrorKind::InternalError,
-                            format!("Unable to read venv config file {}: {}", cfg, e),
-                        ));
-                    }
-                };
-                let ver_info = py.version_info();
-                macro_rules! unwrap_ver_err {
-                    ($v: expr) => {
-                        match $v {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return Err(Error::new(
-                                    ErrorKind::PyException,
-                                    format!("Unable to parse venv version info: {}", e),
-                                ));
-                            }
-                        }
-                    };
-                }
-                macro_rules! unwrap_ver {
-                    ($v: expr) => {
-                        match $v {
-                            Some(v) => v,
-                            None => {
-                                return Err(Error::new(
-                                    ErrorKind::PyException,
-                                    "Unable to get venv version info".to_owned(),
-                                ));
-                            }
-                        }
-                    };
-                }
-                let venv_ver = unwrap_ver!(ini.general_section().get("version"));
-                let mut s = venv_ver.split('.');
-                let venv_major = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
-                let venv_minor = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
-                if venv_major != ver_info.major || venv_minor != ver_info.minor {
+        if let Some(dir) = venv_path {
+            let cfg = format!("{}/pyvenv.cfg", dir);
+            let ini = match Ini::load_from_file(&cfg) {
+                Ok(v) => v,
+                Err(e) => {
                     return Err(Error::new(
-                        ErrorKind::PyException,
-                        format!(
-                            "Unable to activate venv, \
-                            Python library version: {}.{}, venv version: {}. \
-                            Please switch the library or rebuild venv",
-                            ver_info.major, ver_info.minor, venv_ver
-                        ),
+                        ErrorKind::InternalError,
+                        format!("Unable to read venv config file {}: {}", cfg, e),
                     ));
                 }
-                match ini.general_section().get("include-system-site-packages") {
-                    Some(v) if v == "false" => {
-                        debug!("Removing system-site packages from Python path");
-                        py.run(
-                            "import sys;list(map(lambda x:sys.path.remove(x) \
+            };
+            let ver_info = py.version_info();
+            macro_rules! unwrap_ver_err {
+                ($v: expr) => {
+                    match $v {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return Err(Error::new(
+                                ErrorKind::PyException,
+                                format!("Unable to parse venv version info: {}", e),
+                            ));
+                        }
+                    }
+                };
+            }
+            macro_rules! unwrap_ver {
+                ($v: expr) => {
+                    match $v {
+                        Some(v) => v,
+                        None => {
+                            return Err(Error::new(
+                                ErrorKind::PyException,
+                                "Unable to get venv version info".to_owned(),
+                            ));
+                        }
+                    }
+                };
+            }
+            let venv_ver = unwrap_ver!(ini.general_section().get("version"));
+            let mut s = venv_ver.split('.');
+            let venv_major = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
+            let venv_minor = unwrap_ver_err!(unwrap_ver!(s.next()).parse::<u8>());
+            if venv_major != ver_info.major || venv_minor != ver_info.minor {
+                return Err(Error::new(
+                    ErrorKind::PyException,
+                    format!(
+                        "Unable to activate venv, \
+                            Python library version: {}.{}, venv version: {}. \
+                            Please switch the library or rebuild venv",
+                        ver_info.major, ver_info.minor, venv_ver
+                    ),
+                ));
+            }
+            match ini.general_section().get("include-system-site-packages") {
+                Some(v) if v == "false" => {
+                    debug!("Removing system-site packages from Python path");
+                    py.run(
+                        "import sys;list(map(lambda x:sys.path.remove(x) \
                             if x.endswith('-packages') or '/dist-packages/' in x or \
                             '/site-packages/' in x else False, sys.path.copy()))",
-                            None,
-                            None,
-                        )?;
-                    }
-                    _ => {}
+                        None,
+                        None,
+                    )?;
                 }
-                let import_path = format!(
-                    "{}/lib/python{}.{}/site-packages",
-                    dir, ver_info.major, ver_info.minor
-                );
-                debug!("Adding Python venv import path: {}", import_path);
-                py.run(
-                    &format!("import sys;sys.path.insert(0,'{}')", import_path),
-                    None,
-                    None,
-                )?;
-                //py.run(
-                //"import sys;print(sys.path)",
-                //None,
-                //None,
-                //)?;
+                _ => {}
             }
-            None => {}
+            let import_path = format!(
+                "{}/lib/python{}.{}/site-packages",
+                dir, ver_info.major, ver_info.minor
+            );
+            debug!("Adding Python venv import path: {}", import_path);
+            py.run(
+                &format!("import sys;sys.path.insert(0,'{}')", import_path),
+                None,
+                None,
+            )?;
+            //py.run(
+            //"import sys;print(sys.path)",
+            //None,
+            //None,
+            //)?;
         }
         let neo = py.import("neotasker.embed")?;
         neo.add_function(wrap_pyfunction!(report_result, neo)?)?;
