@@ -170,14 +170,10 @@ pub const STATE_STARTED: u8 = 0xff;
 
 const DATACHANNEL_DEFAULT_BUFFER: usize = 1024;
 
+const PIME_POLL_DELAY: Duration = Duration::from_millis(1);
+
 #[macro_use]
 extern crate lazy_static;
-
-macro_rules! tostr {
-    ($s: expr) => {
-        format!("{}", $s)
-    };
-}
 
 static ENGINE_STATE: AtomicU8 = AtomicU8::new(STATE_STOPPED);
 
@@ -193,17 +189,16 @@ pub enum ErrorKind {
 
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ErrorKind::*;
         write!(
             f,
             "{}",
             match self {
-                PyException => "Python exception",
-                PackError => "Data pack error",
-                UnpackError => "Data unpack error",
-                ExecError => "Task execution error",
-                InternalError => "Internal error",
-                PySyncEngineStateError => "Engine state error",
+                ErrorKind::PyException => "Python exception",
+                ErrorKind::PackError => "Data pack error",
+                ErrorKind::UnpackError => "Data unpack error",
+                ErrorKind::ExecError => "Task execution error",
+                ErrorKind::InternalError => "Internal error",
+                ErrorKind::PySyncEngineStateError => "Engine state error",
             }
         )
     }
@@ -225,7 +220,7 @@ impl fmt::Display for Error {
                 exc += " ";
                 exc += exception;
                 if !self.message.is_empty() {
-                    exc += ":"
+                    exc += ":";
                 }
             };
             write!(f, "{} {}", exc, self.message)
@@ -237,7 +232,7 @@ impl fmt::Display for Error {
 
 impl From<PyErr> for Error {
     fn from(e: PyErr) -> Error {
-        Error::new(ErrorKind::InternalError, tostr!(e))
+        Error::new_internal(e)
     }
 }
 
@@ -246,21 +241,21 @@ where
     T: std::fmt::Debug,
 {
     fn from(e: tokio::sync::mpsc::error::SendError<T>) -> Error {
-        Error::new_internal(tostr!(e))
+        Error::new_internal(e)
     }
 }
 
 impl From<tokio::sync::TryLockError> for Error {
     fn from(e: tokio::sync::TryLockError) -> Error {
-        Error::new_internal(tostr!(e))
+        Error::new_internal(e)
     }
 }
 
 impl Error {
-    pub fn new(kind: ErrorKind, message: String) -> Self {
+    pub fn new<T: fmt::Display>(kind: ErrorKind, message: T) -> Self {
         Self {
             kind,
-            message,
+            message: format!("{}", message),
             exception: None,
             traceback: None,
         }
@@ -274,7 +269,7 @@ impl Error {
         }
     }
 
-    fn new_internal(message: String) -> Self {
+    fn new_internal<T: fmt::Display>(message: T) -> Self {
         Self {
             kind: ErrorKind::PySyncEngineStateError,
             message: format!("CRITICAL: PySyncEngine internal error: {}", message),
@@ -311,6 +306,7 @@ pub struct PyTask {
 }
 
 impl PyTask {
+    #[must_use]
     pub fn new(command: Value, params: BTreeMap<String, Value>) -> Box<Self> {
         Box::new(Self {
             command,
@@ -320,6 +316,7 @@ impl PyTask {
         })
     }
 
+    #[must_use]
     pub fn new0(command: Value) -> Box<Self> {
         Box::new(Self {
             command,
@@ -437,78 +434,75 @@ macro_rules! log_lost_task {
 
 fn report_error(task_id: u64, error: Error) {
     loop {
-        match PY_RESULTS.try_write() {
-            Ok(mut v) => {
-                let o = match v.get_mut(&task_id) {
-                    Some(x) => x,
-                    None => {
-                        log_lost_task!(task_id);
-                        return;
-                    }
-                };
+        if let Ok(mut v) = PY_RESULTS.try_write() {
+            if let Some(o) = v.get_mut(&task_id) {
                 o.set_error(error);
                 o.ready.trigger();
                 break;
             }
-            Err(_) => {
-                std::thread::sleep(Duration::from_millis(1));
-                continue;
+            log_lost_task!(task_id);
+            return;
+        }
+        std::thread::sleep(PIME_POLL_DELAY);
+        continue;
+    }
+}
+
+#[pyfunction]
+fn report_result(
+    py: Python,
+    task_id: u64,
+    result: Option<Py<PyAny>>,
+    error: Option<(String, String, String)>,
+) {
+    let data: Option<Value> = if let Some(r) = result {
+        match depythonize(r.as_ref(py)) {
+            Ok(v) => v,
+            Err(e) => {
+                report_error(task_id, Error::new(ErrorKind::UnpackError, e));
+                return;
             }
         }
+    } else {
+        None
+    };
+    loop {
+        if let Ok(mut v) = PY_RESULTS.try_write() {
+            if let Some(o) = v.get_mut(&task_id) {
+                o.set_result(data);
+                if let Some(e) = error {
+                    o.set_error(Error::new_py(e));
+                }
+                o.ready.trigger();
+                break;
+            }
+            log_lost_task!(task_id);
+            return;
+        }
+        std::thread::sleep(PIME_POLL_DELAY);
+        continue;
     }
 }
 
 impl<'p> PySyncEngine<'p> {
+    /// # Errors
+    ///
+    /// Will return Err if the Python engine is failed to initialize itself
     pub fn new(py: &'p pyo3::Python) -> Result<Self, Error> {
         PySyncEngine::new_engine(py, None)
     }
+    /// # Errors
+    ///
+    /// Will return Err if the Python engine is failed to initialize itself or venv is
+    /// broken/invalid
     pub fn new_venv(py: &'p pyo3::Python, venv_path: &str) -> Result<Self, Error> {
         PySyncEngine::new_engine(py, Some(venv_path))
     }
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    #[allow(clippy::too_many_lines)]
     fn new_engine(py: &'p pyo3::Python, venv_path: Option<&str>) -> Result<Self, Error> {
         if ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
             return Err(Error::new_online());
-        }
-        #[pyfunction]
-        fn report_result(
-            py: Python,
-            task_id: u64,
-            result: Option<Py<PyAny>>,
-            error: Option<(String, String, String)>,
-        ) {
-            let data: Option<Value> = match result {
-                Some(r) => match depythonize(r.as_ref(py)) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        report_error(task_id, Error::new(ErrorKind::UnpackError, tostr!(e)));
-                        return;
-                    }
-                },
-                None => None,
-            };
-            loop {
-                match PY_RESULTS.try_write() {
-                    Ok(mut v) => {
-                        let o = match v.get_mut(&task_id) {
-                            Some(x) => x,
-                            None => {
-                                log_lost_task!(task_id);
-                                return;
-                            }
-                        };
-                        o.set_result(data);
-                        if let Some(e) = error {
-                            o.set_error(Error::new_py(e));
-                        }
-                        o.ready.trigger();
-                        break;
-                    }
-                    Err(_) => {
-                        std::thread::sleep(Duration::from_millis(1));
-                        continue;
-                    }
-                }
-            }
         }
         if let Some(dir) = venv_path {
             let cfg = format!("{}/pyvenv.cfg", dir);
@@ -563,8 +557,8 @@ impl<'p> PySyncEngine<'p> {
                     ),
                 ));
             }
-            match ini.general_section().get("include-system-site-packages") {
-                Some(v) if v == "false" => {
+            if let Some(v) = ini.general_section().get("include-system-site-packages") {
+                if v == "false" {
                     debug!("Removing system-site packages from Python path");
                     py.run(
                         "import sys;list(map(lambda x:sys.path.remove(x) \
@@ -574,7 +568,6 @@ impl<'p> PySyncEngine<'p> {
                         None,
                     )?;
                 }
-                _ => {}
             }
             let import_path = format!(
                 "{}/lib/python{}.{}/site-packages",
@@ -597,29 +590,43 @@ impl<'p> PySyncEngine<'p> {
         Ok(Self { neo })
     }
 
+    /// # Errors
+    ///
+    /// Will return Err if the Python neotasker module failed to add the import path
     pub fn add_import_path(&self, dir: &str) -> Result<(), Error> {
-        match self.neo.call_method1("add_import_path", (dir,)) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::new(ErrorKind::PyException, tostr!(e))),
-        }
+        self.neo.call_method1("add_import_path", (dir,))?;
+        Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Will return Err if the Python neotasker module failed to enable debugging
     pub fn enable_debug(&self) -> Result<(), Error> {
         self.neo.call_method0("set_debug")?;
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Will return Err if the Python neotasker module failed to set the poll delay
     pub fn set_poll_delay(&self, delay: f32) -> Result<(), Error> {
         self.neo.call_method1("set_poll_delay", (delay,))?;
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Will return Err if the Python neotasker module failed to set the thread pool size
     pub fn set_thread_pool_size(&self, min: u32, max: u32) -> Result<(), Error> {
         self.neo
             .call_method1("set_thread_pool_size", ((min, max),))?;
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Will return Err if the engine is already launched or Python neotasker module is failed to
+    /// be intialized
     pub fn launch(&self, py: &'p pyo3::Python, broker: &pyo3::PyAny) -> Result<(), Error> {
         need_offline!();
 
@@ -634,61 +641,43 @@ impl<'p> PySyncEngine<'p> {
         ENGINE_STATE.store(STATE_STARTED, Ordering::SeqCst);
         debug!("PySyncEngine started");
         loop {
-            let (task_id, t) = match py.allow_threads(|| rx.blocking_recv()) {
-                Some(v) => v,
-                None => {
-                    return Err(Error::new_internal("channel broken".to_owned()));
-                }
-            };
-            match t {
-                None => {
+            if let Some((task_id, t)) = py.allow_threads(|| rx.blocking_recv()) {
+                if let Some(task) = t {
+                    let command = match pythonize(*py, &task.command) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            if task_id != 0 {
+                                report_error(task_id, Error::new(ErrorKind::PackError, e));
+                            };
+                            continue;
+                        }
+                    };
+                    let params = match pythonize(*py, &task.params) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            if task_id != 0 {
+                                report_error(task_id, Error::new(ErrorKind::PackError, e));
+                            };
+                            continue;
+                        }
+                    };
+                    if task.exclusive {
+                        if let Err(e) = call_direct.call1((task_id, broker, command, params)) {
+                            report_error(task_id, Error::new(ErrorKind::ExecError, e));
+                        }
+                    } else if task.need_result {
+                        if let Err(e) = call.call1((task_id, broker, command, params)) {
+                            report_error(task_id, Error::new(ErrorKind::ExecError, e));
+                        }
+                    } else {
+                        let _r = spawn.call1((broker, command, params));
+                    }
+                } else {
                     ENGINE_STATE.store(STATE_STOPPING, Ordering::SeqCst);
                     break;
                 }
-                Some(task) => {
-                    let command = pythonize(*py, &task.command);
-                    let params = pythonize(*py, &task.params);
-                    if command.is_err() {
-                        if task_id != 0 {
-                            report_error(
-                                task_id,
-                                Error::new(ErrorKind::PackError, tostr!(params.err().unwrap())),
-                            );
-                        }
-                        continue;
-                    }
-                    if params.is_err() {
-                        if task_id != 0 {
-                            report_error(
-                                task_id,
-                                Error::new(ErrorKind::PackError, tostr!(params.err().unwrap())),
-                            );
-                        }
-                        continue;
-                    }
-                    if task.exclusive {
-                        match call_direct.call1((
-                            task_id,
-                            broker,
-                            command.unwrap(),
-                            params.unwrap(),
-                        )) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                report_error(task_id, Error::new(ErrorKind::ExecError, tostr!(e)));
-                            }
-                        }
-                    } else if task.need_result {
-                        match call.call1((task_id, broker, command.unwrap(), params.unwrap())) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                report_error(task_id, Error::new(ErrorKind::ExecError, tostr!(e)));
-                            }
-                        }
-                    } else {
-                        let _ = spawn.call1((broker, command.unwrap(), params.unwrap()));
-                    }
-                }
+            } else {
+                return Err(Error::new_internal("channel broken".to_owned()));
             }
         }
         debug!("Stopping PySyncEngine");
@@ -699,6 +688,9 @@ impl<'p> PySyncEngine<'p> {
     }
 }
 
+/// # Errors
+///
+/// Will return Err if the engine is stopped or broken
 pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
     need_online!();
     if !task.need_result {
@@ -714,12 +706,11 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
     let task_id;
     loop {
         let cid = TASK_COUNTER.lock().await.get();
-        match PY_RESULTS.read().await.get(&cid) {
-            Some(_) => critical!("dead tasks in result map"),
-            None => {
-                task_id = cid;
-                break;
-            }
+        if PY_RESULTS.read().await.get(&cid).is_some() {
+            critical!("dead tasks in result map");
+        } else {
+            task_id = cid;
+            break;
         };
     }
     let (trigger, listener) = triggered::trigger();
@@ -740,21 +731,20 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
         .send((task_id, Some(task)))
         .await?;
     listener.await;
-    let res = match PY_RESULTS.write().await.remove(&task_id) {
-        Some(v) => v,
-        None => {
-            return Err(Error::new(
+    PY_RESULTS.write().await.remove(&task_id).map_or_else(
+        || {
+            Err(Error::new(
                 ErrorKind::InternalError,
                 "CRITICAL: Result not found, engine broken".to_owned(),
-            ));
-        }
-    };
-    match res.error {
-        Some(e) => Err(e),
-        None => Ok(res.result),
-    }
+            ))
+        },
+        |res| res.error.map_or(Ok(res.result), Err),
+    )
 }
 
+/// # Errors
+///
+/// Will return Err if the engine is already stopped
 pub async fn stop() -> Result<(), Error> {
     need_online!();
     DC.read().await.tx.lock().await.send((0, None)).await?;
@@ -766,22 +756,26 @@ pub fn get_engine_state() -> u8 {
     ENGINE_STATE.load(Ordering::SeqCst)
 }
 
+#[must_use]
 pub fn is_engine_started() -> bool {
     ENGINE_STATE.load(Ordering::SeqCst) == STATE_STARTED
 }
 
 pub async fn wait_online() {
     while ENGINE_STATE.load(Ordering::SeqCst) != STATE_STARTED {
-        sleep(Duration::from_millis(10)).await;
+        sleep(PIME_POLL_DELAY).await;
     }
 }
 
 pub async fn wait_offline() {
     while ENGINE_STATE.load(Ordering::SeqCst) != STATE_STOPPED {
-        sleep(Duration::from_millis(10)).await;
+        sleep(PIME_POLL_DELAY).await;
     }
 }
 
+/// # Panics
+///
+/// Will panic if the engine is on and the data channel is busy
 pub fn set_mpsc_buffer(buffer: usize) {
     DC.try_write().unwrap().set_buffer(buffer);
 }
