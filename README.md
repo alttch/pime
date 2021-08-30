@@ -149,5 +149,5 @@ def broker(command, params):
 
 ## More examples
 
-https://github.com/alttch/pime/tree/main/examples/
+<https://github.com/alttch/pime/tree/main/examples/>
 

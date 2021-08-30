@@ -149,7 +149,7 @@
 //! 
 //! ## More examples
 //! 
-//! https://github.com/alttch/pime/tree/main/examples/
+//! <https://github.com/alttch/pime/tree/main/examples/>
 //! 
 use ini::Ini;
 use log::{debug, error};
