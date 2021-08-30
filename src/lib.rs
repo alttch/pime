@@ -156,7 +156,7 @@ use log::{debug, error};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use serde_value::Value;
-use std::collections::{BTreeMap, btree_map};
+use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
@@ -531,14 +531,13 @@ impl<'p> PySyncEngine<'p> {
             }
             macro_rules! unwrap_ver {
                 ($v: expr) => {
-                    match $v {
-                        Some(v) => v,
-                        None => {
-                            return Err(Error::new(
-                                ErrorKind::PyException,
-                                "Unable to get venv version info".to_owned(),
-                            ));
-                        }
+                    if let Some(v) = $v {
+                        v
+                    } else {
+                        return Err(Error::new(
+                            ErrorKind::PyException,
+                            "Unable to get venv version info".to_owned(),
+                        ));
                     }
                 };
             }
