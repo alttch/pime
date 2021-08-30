@@ -156,7 +156,7 @@ use log::{debug, error};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use serde_value::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map};
 use std::fmt;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
@@ -703,26 +703,20 @@ pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
             .await?;
         return Ok(None);
     }
-    let task_id;
-    loop {
-        let cid = TASK_COUNTER.lock().await.get();
-        if PY_RESULTS.read().await.get(&cid).is_some() {
-            critical!("dead tasks in result map");
-        } else {
-            task_id = cid;
-            break;
-        };
-    }
     let (trigger, listener) = triggered::trigger();
-    PY_RESULTS.write().await.insert(
-        task_id,
-        PyTaskResult {
-            task_id,
-            result: None,
-            error: None,
-            ready: trigger,
-        },
-    );
+    let task_id = loop {
+        let cid = TASK_COUNTER.lock().await.get();
+        if let btree_map::Entry::Vacant(x) = PY_RESULTS.write().await.entry(cid) {
+            x.insert(PyTaskResult {
+                task_id: cid,
+                result: None,
+                error: None,
+                ready: trigger,
+            });
+            break cid;
+        }
+        critical!("dead tasks in result map");
+    };
     DC.read()
         .await
         .tx
