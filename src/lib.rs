@@ -307,23 +307,23 @@ pub struct PyTask {
 
 impl PyTask {
     #[must_use]
-    pub fn new(command: Value, params: BTreeMap<String, Value>) -> Box<Self> {
-        Box::new(Self {
+    pub fn new(command: Value, params: BTreeMap<String, Value>) -> Self {
+        Self {
             command,
             params,
             need_result: true,
             exclusive: false,
-        })
+        }
     }
 
     #[must_use]
-    pub fn new0(command: Value) -> Box<Self> {
-        Box::new(Self {
+    pub fn new0(command: Value) -> Self {
+        Self {
             command,
             params: BTreeMap::new(),
             need_result: true,
             exclusive: false,
-        })
+        }
     }
 
     pub fn no_wait(&mut self) {
@@ -337,13 +337,13 @@ impl PyTask {
 }
 
 struct DataChannel {
-    tx: Mutex<mpsc::Sender<(u64, Option<Box<PyTask>>)>>,
-    rx: Mutex<mpsc::Receiver<(u64, Option<Box<PyTask>>)>>,
+    tx: Mutex<mpsc::Sender<(u64, Option<PyTask>)>>,
+    rx: Mutex<mpsc::Receiver<(u64, Option<PyTask>)>>,
 }
 
 impl DataChannel {
     fn new() -> Self {
-        let (tx, rx) = mpsc::channel::<(u64, Option<Box<PyTask>>)>(DATACHANNEL_DEFAULT_BUFFER);
+        let (tx, rx) = mpsc::channel::<(u64, Option<PyTask>)>(DATACHANNEL_DEFAULT_BUFFER);
         Self {
             tx: Mutex::new(tx),
             rx: Mutex::new(rx),
@@ -351,7 +351,7 @@ impl DataChannel {
     }
 
     fn set_buffer(&mut self, buffer: usize) {
-        let (tx, rx) = mpsc::channel::<(u64, Option<Box<PyTask>>)>(buffer);
+        let (tx, rx) = mpsc::channel::<(u64, Option<PyTask>)>(buffer);
         self.tx = Mutex::new(tx);
         self.rx = Mutex::new(rx);
     }
@@ -361,14 +361,14 @@ impl DataChannel {
 struct PyTaskResult {
     task_id: u64,
     ready: triggered::Trigger,
-    result: Option<Box<Value>>,
+    result: Option<Value>,
     error: Option<Error>,
 }
 
 impl PyTaskResult {
     #[allow(clippy::redundant_closure)]
     fn set_result(&mut self, result: Option<Value>) {
-        self.result = result.map(|v| Box::new(v));
+        self.result = result;
     }
     fn set_error(&mut self, error: Error) {
         self.error = Some(error);
@@ -394,8 +394,7 @@ impl PyTaskCounter {
 }
 
 lazy_static! {
-    static ref PY_RESULTS: RwLock<Box<BTreeMap<u64, PyTaskResult>>> =
-        RwLock::new(Box::new(BTreeMap::new()));
+    static ref PY_RESULTS: RwLock<BTreeMap<u64, PyTaskResult>> = RwLock::new(BTreeMap::new());
     static ref TASK_COUNTER: Mutex<PyTaskCounter> = Mutex::new(PyTaskCounter::new());
     static ref DC: RwLock<DataChannel> = RwLock::new(DataChannel::new());
 }
@@ -690,7 +689,7 @@ impl<'p> PySyncEngine<'p> {
 /// # Errors
 ///
 /// Will return Err if the engine is stopped or broken
-pub async fn call(task: Box<PyTask>) -> Result<Option<Box<Value>>, Error> {
+pub async fn call(task: PyTask) -> Result<Option<Value>, Error> {
     need_online!();
     if !task.need_result {
         DC.read()
