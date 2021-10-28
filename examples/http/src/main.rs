@@ -25,7 +25,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
         // use with care!
         task.mark_exclusive();
         match pime::call(task).await {
-            Ok(v) => match *v.unwrap() {
+            Ok(v) => match v.unwrap() {
                 Value::String(s) => Ok(Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::from(s))

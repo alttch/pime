@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "pime"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "lazy_static",
  "log",
